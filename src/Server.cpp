@@ -1,8 +1,21 @@
 #include <iostream>
 #include <string>
+#include <cctype>
+#include <stdexcept>
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) {
-    if (pattern.length() == 1) {
+    if (pattern == "\\d")
+    {
+        for(unsigned char ch: input_line)
+        {
+            if (std::isdigit(ch))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    else if (pattern.length() == 1) {
         return input_line.find(pattern) != std::string::npos;
     }
     else {
