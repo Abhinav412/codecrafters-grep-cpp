@@ -15,6 +15,17 @@ bool match_pattern(const std::string& input_line, const std::string& pattern) {
         }
         return false;
     }
+    else if (pattern == "\\w")
+    {
+        for (unsigned char ch : input_line)
+        {
+            if (std::isalnum(ch) || ch == '_')
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     else if (pattern.length() == 1) {
         return input_line.find(pattern) != std::string::npos;
     }
