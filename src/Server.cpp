@@ -26,6 +26,20 @@ bool match_pattern(const std::string& input_line, const std::string& pattern) {
         }
         return false;
     }
+    else if (pattern.size() >= 3 && pattern.substr(0,2) == std::string("[^") && pattern.back() == ']')
+    {
+        const std::string inside = pattern.substr(2,pattern.size()-3);
+        if (inside.empty()) return false;
+        
+        for(unsigned char ch : input_line)
+        {
+            if(inside.find(ch) == std::string::npos)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     else if (pattern.size() >=2 && pattern.front() == '[' && pattern.back() == ']')
     {
         const std::string inside = pattern.substr(1,pattern.size()-2);
