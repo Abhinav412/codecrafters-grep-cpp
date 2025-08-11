@@ -2,64 +2,104 @@
 #include <string>
 #include <cctype>
 #include <stdexcept>
+#include <vector>
+
+enum class TokenType {
+    Literal,
+    Digit,
+    Word,
+    PosGroup,
+    NegGroup
+};
+
+struct Token {
+    TokenType type;
+    std::string value;
+};
+
+std::vector<Token> tokenize(const std::string& pattern)
+{
+    std::vector<Token> tokens;
+    for(size_t i=0; i<pattern.size();)
+    {
+        if(pattern[i] == '\\' && i+1 < pattern.size())
+        {
+            if(pattern[i+1] == 'd')
+            {
+                tokens.push_back({TokenType::Digit, ""});
+                i += 2;
+            }
+            else if(pattern[i+1] == 'w')
+            {
+                tokens.push_back({TokenType::Word, ""});
+                i += 2;
+            }
+            else
+            {
+                tokens.push_back({TokenType::Literal, std::string(1,pattern[i+1])});
+                i += 2;
+            }
+        }
+        else if (pattern[i] == '[')
+        {
+            size_t close = pattern.find(']',i);
+            if(close == std::string::npos) throw std::runtime_error("Unclosed [");
+            if(i + 1 < pattern.size() && pattern[i+1] == '^')
+            {
+                tokens.push_back({TokenType::NegGroup, pattern.substr(i+2, close-i-2)});
+            }
+            else
+            {
+                tokens.push_back({TokenType::PosGroup, pattern.substr(i+1,close-i-1)});
+            }
+            i = close + 1;
+        }
+        else
+        {
+            tokens.push_back({TokenType::Literal, std::string(1,pattern[i])});
+            i++;
+        }
+    }
+    return tokens;
+}
+
+bool match_at(const std::string& input, size_t pos, const std::vector<Token>& tokens)
+{
+    size_t i = pos;
+    for(const auto& token : tokens)
+    {
+        if(i >= input.size()) return false;
+        unsigned char ch = input[i];
+        switch(token.type)
+        {
+            case TokenType::Digit:
+                if(!std::isdigit(ch)) return false;
+                break;
+            case TokenType::Word:
+                if(!(std::isalnum(ch) || ch == '_')) return false;
+                break;
+            case TokenType::Literal:
+                if(ch != token.value[0]) return false;
+                break;
+            case TokenType::PosGroup:
+                if(token.value.find(ch) == std::string::npos) return false;
+                break;
+            case TokenType::NegGroup:
+                if(token.value.find(ch) != std::string::npos) return false;
+                break;
+        }
+        i++;
+    }    
+    return true;
+}
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) {
-    if (pattern == "\\d")
+    auto tokens = tokenize(pattern);
+    for(size_t pos = 0; pos+tokens.size() <= input_line.size(); ++pos)
     {
-        for(unsigned char ch: input_line)
-        {
-            if (std::isdigit(ch))
-            {
-                return true;
-            }
-        }
-        return false;
+        if(match_at(input_line,pos,tokens)) return true;
     }
-    else if (pattern == "\\w")
-    {
-        for (unsigned char ch : input_line)
-        {
-            if (std::isalnum(ch) || ch == '_')
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-    else if (pattern.size() >= 3 && pattern.substr(0,2) == std::string("[^") && pattern.back() == ']')
-    {
-        const std::string inside = pattern.substr(2,pattern.size()-3);
-        if (inside.empty()) return false;
-        
-        for(unsigned char ch : input_line)
-        {
-            if(inside.find(ch) == std::string::npos)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-    else if (pattern.size() >=2 && pattern.front() == '[' && pattern.back() == ']')
-    {
-        const std::string inside = pattern.substr(1,pattern.size()-2);
-        if (inside.empty()) return false;
-
-        for(unsigned char ch:input_line)
-        {
-            if (inside.find(ch) != std::string::npos)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-    else if (pattern.length() == 1) {
-        return input_line.find(pattern) != std::string::npos;
-    }
-    else {
-        throw std::runtime_error("Unhandled pattern " + pattern);
-    }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
