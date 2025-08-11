@@ -5,6 +5,7 @@
 #include <vector>
 
 enum class TokenType {
+    StartAnchor,
     Literal,
     Digit,
     Word,
@@ -20,7 +21,13 @@ struct Token {
 std::vector<Token> tokenize(const std::string& pattern)
 {
     std::vector<Token> tokens;
-    for(size_t i=0; i<pattern.size();)
+    size_t i = 0;
+    if(!pattern.empty() && pattern[0] == '^')
+    {
+        tokens.push_back({TokenType::StartAnchor,""});
+        i = 1;
+    }
+    for(;i<pattern.size();)
     {
         if(pattern[i] == '\\' && i+1 < pattern.size())
         {
@@ -66,11 +73,17 @@ std::vector<Token> tokenize(const std::string& pattern)
 bool match_at(const std::string& input, size_t pos, const std::vector<Token>& tokens)
 {
     size_t i = pos;
-    for(const auto& token : tokens)
+    size_t t = 0;
+    if (!tokens.empty() && tokens[0].type == TokenType::StartAnchor)
+    {
+        if (pos != 0) return false;
+        t = 1;
+    }
+    for(; t<tokens.size(); ++t)
     {
         if(i >= input.size()) return false;
         unsigned char ch = input[i];
-        switch(token.type)
+        switch(tokens[t].type)
         {
             case TokenType::Digit:
                 if(!std::isdigit(ch)) return false;
@@ -79,13 +92,15 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
                 if(!(std::isalnum(ch) || ch == '_')) return false;
                 break;
             case TokenType::Literal:
-                if(ch != token.value[0]) return false;
+                if(ch != tokens[t].value[0]) return false;
                 break;
             case TokenType::PosGroup:
-                if(token.value.find(ch) == std::string::npos) return false;
+                if(tokens[t].value.find(ch) == std::string::npos) return false;
                 break;
             case TokenType::NegGroup:
-                if(token.value.find(ch) != std::string::npos) return false;
+                if(tokens[t].value.find(ch) != std::string::npos) return false;
+                break;
+            case TokenType::StartAnchor:
                 break;
         }
         i++;
@@ -95,11 +110,16 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) {
     auto tokens = tokenize(pattern);
-    for(size_t pos = 0; pos+tokens.size() <= input_line.size(); ++pos)
+    bool anchored = !tokens.empty() && tokens[0].type == TokenType::StartAnchor;
+    if (anchored) {
+        return match_at(input_line,0,tokens);
+    } else {
+        for(size_t pos = 0; pos+tokens.size() <= input_line.size(); ++pos)
     {
         if(match_at(input_line,pos,tokens)) return true;
     }
     return false;
+    }
 }
 
 int main(int argc, char* argv[]) {
