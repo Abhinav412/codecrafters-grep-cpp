@@ -6,6 +6,7 @@
 
 enum class TokenType {
     StartAnchor,
+    EndAnchor,
     Literal,
     Digit,
     Word,
@@ -27,9 +28,13 @@ std::vector<Token> tokenize(const std::string& pattern)
         tokens.push_back({TokenType::StartAnchor,""});
         i = 1;
     }
-    for(;i<pattern.size();)
+    size_t end = pattern.size();
+    bool has_end_anchor = (end > i && pattern[end-1] == '$');
+    if(has_end_anchor) end--;
+
+    for(;i<end;)
     {
-        if(pattern[i] == '\\' && i+1 < pattern.size())
+        if(pattern[i] == '\\' && i+1 < end)
         {
             if(pattern[i+1] == 'd')
             {
@@ -51,7 +56,7 @@ std::vector<Token> tokenize(const std::string& pattern)
         {
             size_t close = pattern.find(']',i);
             if(close == std::string::npos) throw std::runtime_error("Unclosed [");
-            if(i + 1 < pattern.size() && pattern[i+1] == '^')
+            if(i + 1 < end && pattern[i+1] == '^')
             {
                 tokens.push_back({TokenType::NegGroup, pattern.substr(i+2, close-i-2)});
             }
@@ -67,6 +72,10 @@ std::vector<Token> tokenize(const std::string& pattern)
             i++;
         }
     }
+    if(has_end_anchor)
+    {
+        tokens.push_back({TokenType::EndAnchor,""});
+    }
     return tokens;
 }
 
@@ -81,6 +90,10 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
     }
     for(; t<tokens.size(); ++t)
     {
+        if(tokens[t].type == TokenType::EndAnchor)
+        {
+            return i == input.size();
+        }
         if(i >= input.size()) return false;
         unsigned char ch = input[i];
         switch(tokens[t].type)
@@ -102,6 +115,8 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
                 break;
             case TokenType::StartAnchor:
                 break;
+            case TokenType::EndAnchor:
+                break;
         }
         i++;
     }    
@@ -110,9 +125,15 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) {
     auto tokens = tokenize(pattern);
-    bool anchored = !tokens.empty() && tokens[0].type == TokenType::StartAnchor;
-    if (anchored) {
+    bool anchored_start = !tokens.empty() && tokens[0].type == TokenType::StartAnchor;
+    bool anchored_end = !tokens.empty() && tokens.back().type == TokenType::EndAnchor;
+    if (anchored_start) {
         return match_at(input_line,0,tokens);
+    } else if (anchored_end) {
+        size_t match_len = tokens.size();
+        if(input_line.size() + 1 < match_len) return false;
+        size_t pos = input_line.size() - (match_len - 1);
+        return match_at(input_line,pos,tokens);
     } else {
         for(size_t pos = 0; pos+tokens.size() <= input_line.size(); ++pos)
     {
