@@ -17,6 +17,7 @@ enum class TokenType {
 struct Token {
     TokenType type;
     std::string value;
+    bool one_or_more = false;
 };
 
 std::vector<Token> tokenize(const std::string& pattern)
@@ -32,23 +33,24 @@ std::vector<Token> tokenize(const std::string& pattern)
     bool has_end_anchor = (end > i && pattern[end-1] == '$');
     if(has_end_anchor) end--;
 
-    for(;i<end;)
+    while(i < end)
     {
+        Token token;
         if(pattern[i] == '\\' && i+1 < end)
         {
             if(pattern[i+1] == 'd')
             {
-                tokens.push_back({TokenType::Digit, ""});
+                token = {TokenType::Digit, ""};
                 i += 2;
             }
             else if(pattern[i+1] == 'w')
             {
-                tokens.push_back({TokenType::Word, ""});
+                token = {TokenType::Word, ""};
                 i += 2;
             }
             else
             {
-                tokens.push_back({TokenType::Literal, std::string(1,pattern[i+1])});
+                token = {TokenType::Literal, std::string(1,pattern[i+1])};
                 i += 2;
             }
         }
@@ -58,25 +60,44 @@ std::vector<Token> tokenize(const std::string& pattern)
             if(close == std::string::npos) throw std::runtime_error("Unclosed [");
             if(i + 1 < end && pattern[i+1] == '^')
             {
-                tokens.push_back({TokenType::NegGroup, pattern.substr(i+2, close-i-2)});
+                token = {TokenType::NegGroup, pattern.substr(i+2, close-i-2)};
             }
             else
             {
-                tokens.push_back({TokenType::PosGroup, pattern.substr(i+1,close-i-1)});
+                token = {TokenType::PosGroup, pattern.substr(i+1,close-i-1)};
             }
             i = close + 1;
         }
         else
         {
-            tokens.push_back({TokenType::Literal, std::string(1,pattern[i])});
+            token = {TokenType::Literal, std::string(1,pattern[i])};
             i++;
         }
+        if(i < end && pattern[i] == '+')
+        {
+            token.one_or_more = true;
+            i++;
+        }
+        tokens.push_back(token);
     }
     if(has_end_anchor)
     {
         tokens.push_back({TokenType::EndAnchor,""});
     }
     return tokens;
+}
+
+bool match_token(const Token& token, unsigned char ch)
+{
+    switch(token.type)
+    {
+        case TokenType::Digit: return std::isdigit(ch);
+        case TokenType::Word: return std::isalnum(ch) || ch == '_';
+        case TokenType::Literal: return ch == token.value[0];
+        case TokenType::PosGroup: return token.value.find(ch) != std::string::npos;
+        case TokenType::NegGroup: return token.value.find(ch) == std::string::npos;
+        default: return false;
+    }
 }
 
 bool match_at(const std::string& input, size_t pos, const std::vector<Token>& tokens)
@@ -94,31 +115,29 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
         {
             return i == input.size();
         }
-        if(i >= input.size()) return false;
-        unsigned char ch = input[i];
-        switch(tokens[t].type)
+        if(tokens[t].one_or_more)
         {
-            case TokenType::Digit:
-                if(!std::isdigit(ch)) return false;
-                break;
-            case TokenType::Word:
-                if(!(std::isalnum(ch) || ch == '_')) return false;
-                break;
-            case TokenType::Literal:
-                if(ch != tokens[t].value[0]) return false;
-                break;
-            case TokenType::PosGroup:
-                if(tokens[t].value.find(ch) == std::string::npos) return false;
-                break;
-            case TokenType::NegGroup:
-                if(tokens[t].value.find(ch) != std::string::npos) return false;
-                break;
-            case TokenType::StartAnchor:
-                break;
-            case TokenType::EndAnchor:
-                break;
+            size_t start = 1;
+            size_t count = 0;
+            while(i < input.size() && match_token(tokens[t],input[i]))
+            {
+                i++;
+                count++;
+            }
+            if(count == 0) return false;
+            for(size_t split = count; split>=1; --split)
+            {
+                if(match_at(input,start+split,std::vector<Token>(tokens.begin()+t+1, tokens.end()))){
+                    return true;
+                }
+            }
+            return false;
         }
-        i++;
+        else
+        {
+            if(i >= input.size() || !match_token(tokens[t],input[i])) return false;
+            i++;
+        }
     }    
     return true;
 }
