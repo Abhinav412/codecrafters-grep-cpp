@@ -18,6 +18,7 @@ struct Token {
     TokenType type;
     std::string value;
     bool one_or_more = false;
+    bool zero_or_one = false;
 };
 
 std::vector<Token> tokenize(const std::string& pattern)
@@ -78,6 +79,11 @@ std::vector<Token> tokenize(const std::string& pattern)
             token.one_or_more = true;
             i++;
         }
+        else if(i < end && pattern[i] == '?')
+        {
+            token.zero_or_one = true;
+            i++;
+        }
         tokens.push_back(token);
     }
     if(has_end_anchor)
@@ -117,7 +123,7 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
         }
         if(tokens[t].one_or_more)
         {
-            size_t start = 1;
+            size_t start = i;
             size_t count = 0;
             while(i < input.size() && match_token(tokens[t],input[i]))
             {
@@ -128,6 +134,19 @@ bool match_at(const std::string& input, size_t pos, const std::vector<Token>& to
             for(size_t split = count; split>=1; --split)
             {
                 if(match_at(input,start+split,std::vector<Token>(tokens.begin()+t+1, tokens.end()))){
+                    return true;
+                }
+            }
+            return false;
+        }
+        else if(tokens[t].zero_or_one)
+        {
+            if(match_at(input, i, std::vector<Token>(tokens.begin()+t+1, tokens.end())))
+            return true;
+            if(i < input.size() && match_token(tokens[t], input[i]))
+            {
+                if(match_at(input, i+1, std::vector<Token>(tokens.begin()+t+1, tokens.end())))
+                {
                     return true;
                 }
             }
@@ -154,7 +173,7 @@ bool match_pattern(const std::string& input_line, const std::string& pattern) {
         size_t pos = input_line.size() - (match_len - 1);
         return match_at(input_line,pos,tokens);
     } else {
-        for(size_t pos = 0; pos+tokens.size() <= input_line.size(); ++pos)
+        for(size_t pos = 0; pos <= input_line.size(); ++pos)
     {
         if(match_at(input_line,pos,tokens)) return true;
     }
