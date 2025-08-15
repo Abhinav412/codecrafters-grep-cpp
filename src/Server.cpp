@@ -11,7 +11,8 @@ enum class TokenType {
     Digit,
     Word,
     PosGroup,
-    NegGroup
+    NegGroup,
+    Dot
 };
 
 struct Token {
@@ -69,6 +70,11 @@ std::vector<Token> tokenize(const std::string& pattern)
             }
             i = close + 1;
         }
+        else if (pattern[i] == '.')
+        {
+            token = {TokenType::Dot,""};
+            i++;
+        }
         else
         {
             token = {TokenType::Literal, std::string(1,pattern[i])};
@@ -102,6 +108,7 @@ bool match_token(const Token& token, unsigned char ch)
         case TokenType::Literal: return ch == token.value[0];
         case TokenType::PosGroup: return token.value.find(ch) != std::string::npos;
         case TokenType::NegGroup: return token.value.find(ch) == std::string::npos;
+        case TokenType::Dot: return true;
         default: return false;
     }
 }
