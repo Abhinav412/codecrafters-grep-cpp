@@ -6,6 +6,7 @@
 #include <set>
 #include <algorithm>
 #include <functional>
+#include <map>
 
 enum class TokenType {
     StartAnchor,
@@ -16,7 +17,8 @@ enum class TokenType {
     PosGroup,
     NegGroup,
     Dot,
-    Group
+    Group,
+    BackReference
 };
 
 struct Token {
@@ -25,9 +27,16 @@ struct Token {
     bool one_or_more = false;
     bool zero_or_one = false;
     std::vector<std::vector<Token>> alternatives;
+    int group_id = 0;
+    int backref_id = 0;
 };
 
-static std::vector<Token> parse_range(const std::string& pattern, size_t begin, size_t end);
+struct MatchState {
+    std::map<int, std::string> captures;
+    int next_group_id = 1;
+};
+
+static std::vector<Token> parse_range(const std::string& pattern, size_t begin, size_t end, int& group_counter);
 
 std::vector<Token> tokenize(const std::string& pattern)
 {
@@ -42,7 +51,8 @@ std::vector<Token> tokenize(const std::string& pattern)
     bool has_end_anchor = (end > i && pattern[end-1] == '$');
     if(has_end_anchor) end--;
 
-    auto middle = parse_range(pattern, i, end);
+    int group_counter = 1;
+    auto middle = parse_range(pattern, i, end, group_counter);
     tokens.insert(tokens.end(), middle.begin(), middle.end());
 
     if(has_end_anchor)
@@ -52,10 +62,11 @@ std::vector<Token> tokenize(const std::string& pattern)
     return tokens;
 }
 
-static std::vector<Token> parse_range(const std::string& pattern, size_t begin, size_t end)
+static std::vector<Token> parse_range(const std::string& pattern, size_t begin, size_t end, int& group_counter)
 {
     std::vector<Token> out;
     size_t i = begin;
+
     while(i < end)
     {
         Token token;
@@ -64,6 +75,11 @@ static std::vector<Token> parse_range(const std::string& pattern, size_t begin, 
             char c = pattern[i+1];
             if (c == 'd') {token = {TokenType::Digit,""}; i += 2;}
             else if(c == 'w') {token = {TokenType::Word,""}; i += 2;}
+            else if(std::isdigit(c)) {
+                token = {TokenType::BackReference, ""};
+                token.backref_id = c - '0';
+                i += 2;
+            }
             else {token = {TokenType::Literal, std::string(1,c)}; i += 2;}
         }
         else if (pattern[i] == '[')
@@ -131,8 +147,9 @@ static std::vector<Token> parse_range(const std::string& pattern, size_t begin, 
 
             Token groupTok;
             groupTok.type = TokenType::Group;
+            groupTok.group_id = group_counter++;
             for(auto &seg : segments) {
-                groupTok.alternatives.push_back(parse_range(pattern,seg.first,seg.second));
+                groupTok.alternatives.push_back(parse_range(pattern,seg.first,seg.second, group_counter));
             }
             token = std::move(groupTok);
             i = j + 1;
@@ -164,176 +181,206 @@ bool match_token(const Token& token, unsigned char ch)
     }
 }
 
-static std::vector<size_t> match_one(const Token& token, const std::string& input, size_t pos);
+static std::vector<std::pair<size_t, MatchState>> match_one(const Token& token, const std::string& input, size_t pos, const MatchState& state);
 
-// Recursive backtracking matcher for a sequence of tokens starting at seq[idx]
-static bool match_seq(const std::vector<Token>& seq, size_t idx, const std::string& input, size_t pos)
+static bool match_seq(const std::vector<Token>& seq, size_t idx, const std::string& input, size_t pos, MatchState& state)
 {
     if (idx >= seq.size()) return true;
     const Token& t = seq[idx];
 
     if (t.one_or_more)
     {
-        // Need at least one match of t, then any number
         std::set<size_t> reach;
-        std::vector<size_t> first = match_one(t, input, pos);
-        if (first.empty()) return false; // No initial match
+        std::vector<std::pair<size_t, MatchState>> first = match_one(t, input, pos, state);
+        if (first.empty()) return false;
         
-        for (auto p : first) reach.insert(p);
-        std::vector<size_t> frontier(first.begin(), first.end());
+        std::vector<std::pair<size_t, MatchState>> all_positions = first;
+        for (auto& p : first) reach.insert(p.first);
+        std::vector<std::pair<size_t, MatchState>> frontier(first.begin(), first.end());
         
         while (!frontier.empty())
         {
-            std::vector<size_t> next;
-            for (auto p : frontier)
+            std::vector<std::pair<size_t, MatchState>> next;
+            for (auto& p : frontier)
             {
-                auto more = match_one(t, input, p);
-                for (auto q : more) {
-                    if (reach.insert(q).second) next.push_back(q);
+                auto more = match_one(t, input, p.first, p.second);
+                for (auto& q : more) {
+                    if (reach.insert(q.first).second) {
+                        next.push_back(q);
+                        all_positions.push_back(q);
+                    }
                 }
             }
             frontier.swap(next);
         }
         
-        for (auto endpos : reach)
+        for (auto& endpair : all_positions)
         {
-            if (match_seq(seq, idx + 1, input, endpos)) return true;
+            MatchState temp_state = endpair.second;
+            if (match_seq(seq, idx + 1, input, endpair.first, temp_state)) {
+                state = temp_state;
+                return true;
+            }
         }
         return false;
     }
     else if (t.zero_or_one)
     {
-        // Try skipping
-        if (match_seq(seq, idx + 1, input, pos)) return true;
-        // Try taking one
-        auto ends = match_one(t, input, pos);
-        for (auto e : ends) {
-            if (match_seq(seq, idx + 1, input, e)) return true;
+        MatchState temp_state = state;
+        if (match_seq(seq, idx + 1, input, pos, temp_state)) {
+            state = temp_state;
+            return true;
+        }
+        auto ends = match_one(t, input, pos, state);
+        for (auto& e : ends) {
+            temp_state = e.second;
+            if (match_seq(seq, idx + 1, input, e.first, temp_state)) {
+                state = temp_state;
+                return true;
+            }
         }
         return false;
     }
     else
     {
-        auto ends = match_one(t, input, pos);
-        for (auto e : ends) {
-            if (match_seq(seq, idx + 1, input, e)) return true;
+        auto ends = match_one(t, input, pos, state);
+        for (auto& e : ends) {
+            MatchState temp_state = e.second;
+            if (match_seq(seq, idx + 1, input, e.first, temp_state)) {
+                state = temp_state;
+                return true;
+            }
         }
         return false;
     }
 }
 
-static std::vector<size_t> match_one(const Token& token, const std::string& input, size_t pos)
+static std::vector<std::pair<size_t, MatchState>> match_one(const Token& token, const std::string& input, size_t pos, const MatchState& state)
 {
-    std::vector<size_t> res;
+    std::vector<std::pair<size_t, MatchState>> res;
     
     if (token.type == TokenType::Group)
     {
         for (const auto &alt : token.alternatives)
         {
-            // For each alternative, try to match the whole alternative sequence starting at pos
-            std::function<std::vector<size_t>(const std::vector<Token>&, size_t, size_t)> ends_after;
-            ends_after = [&](const std::vector<Token>& s, size_t idx2, size_t ppos) -> std::vector<size_t> {
-                if (idx2 >= s.size()) return std::vector<size_t>{ppos};
+            std::function<std::vector<std::pair<size_t, MatchState>>(const std::vector<Token>&, size_t, size_t, const MatchState&)> ends_after;
+            ends_after = [&](const std::vector<Token>& s, size_t idx2, size_t ppos, const MatchState& current_state) -> std::vector<std::pair<size_t, MatchState>> {
+                if (idx2 >= s.size()) return std::vector<std::pair<size_t, MatchState>>{{ppos, current_state}};
                 
                 const Token &tt = s[idx2];
-                std::vector<size_t> outpos;
+                std::vector<std::pair<size_t, MatchState>> outpos;
                 
                 if (tt.one_or_more)
                 {
                     std::set<size_t> reach;
-                    std::vector<size_t> first = match_one(tt, input, ppos);
-                    if (first.empty()) return outpos; // No match
+                    std::vector<std::pair<size_t, MatchState>> first = match_one(tt, input, ppos, current_state);
+                    if (first.empty()) return outpos;
                     
-                    for (auto p : first) reach.insert(p);
-                    std::vector<size_t> frontier(first.begin(), first.end());
+                    std::vector<std::pair<size_t, MatchState>> all_positions = first;
+                    for (auto& p : first) reach.insert(p.first);
+                    std::vector<std::pair<size_t, MatchState>> frontier(first.begin(), first.end());
                     
                     while (!frontier.empty())
                     {
-                        std::vector<size_t> next;
-                        for (auto p : frontier)
+                        std::vector<std::pair<size_t, MatchState>> next;
+                        for (auto& p : frontier)
                         {
-                            auto more = match_one(tt, input, p);
-                            for (auto q : more) {
-                                if (reach.insert(q).second) next.push_back(q);
+                            auto more = match_one(tt, input, p.first, p.second);
+                            for (auto& q : more) {
+                                if (reach.insert(q.first).second) {
+                                    next.push_back(q);
+                                    all_positions.push_back(q);
+                                }
                             }
                         }
                         frontier.swap(next);
                     }
                     
-                    for (auto after : reach)
+                    for (auto& after : all_positions)
                     {
-                        auto later = ends_after(s, idx2+1, after);
+                        auto later = ends_after(s, idx2+1, after.first, after.second);
                         outpos.insert(outpos.end(), later.begin(), later.end());
                     }
                 }
                 else if (tt.zero_or_one)
                 {
-                    // Try skipping
-                    auto later = ends_after(s, idx2+1, ppos);
+                    auto later = ends_after(s, idx2+1, ppos, current_state);
                     outpos.insert(outpos.end(), later.begin(), later.end());
                     
-                    // Try taking one
-                    auto one = match_one(tt, input, ppos);
-                    for (auto p : one)
+                    auto one = match_one(tt, input, ppos, current_state);
+                    for (auto& p : one)
                     {
-                        auto later = ends_after(s, idx2+1, p);
+                        auto later = ends_after(s, idx2+1, p.first, p.second);
                         outpos.insert(outpos.end(), later.begin(), later.end());
                     }
                 }
                 else
                 {
-                    auto one = match_one(tt, input, ppos);
-                    for (auto p : one)
+                    auto one = match_one(tt, input, ppos, current_state);
+                    for (auto& p : one)
                     {
-                        auto later = ends_after(s, idx2+1, p);
+                        auto later = ends_after(s, idx2+1, p.first, p.second);
                         outpos.insert(outpos.end(), later.begin(), later.end());
                     }
                 }
                 return outpos;
             };
 
-            auto ends = ends_after(alt, 0, pos);
-            for (auto e : ends) res.push_back(e);
+            auto ends = ends_after(alt, 0, pos, state);
+            for (auto& e : ends) {
+                MatchState new_state = e.second;
+                std::string captured = input.substr(pos, e.first - pos);
+                new_state.captures[token.group_id] = captured;
+                res.push_back({e.first, new_state});
+            }
+        }
+    }
+    else if (token.type == TokenType::BackReference)
+    {
+        auto it = state.captures.find(token.backref_id);
+        if (it != state.captures.end())
+        {
+            const std::string& captured = it->second;
+            if (pos + captured.length() <= input.size() && 
+                input.substr(pos, captured.length()) == captured)
+            {
+                res.push_back({pos + captured.length(), state});
+            }
         }
     }
     else if (token.type == TokenType::StartAnchor)
     {
-        if (pos == 0) res.push_back(pos);
+        if (pos == 0) res.push_back({pos, state});
     }
     else if (token.type == TokenType::EndAnchor)
     {
-        if (pos == input.size()) res.push_back(pos);
+        if (pos == input.size()) res.push_back({pos, state});
     }
     else
     {
         if (pos < input.size() && match_token(token, static_cast<unsigned char>(input[pos])))
         {
-            res.push_back(pos + 1);
+            res.push_back({pos + 1, state});
         }
     }
     
-    // Remove duplicates
-    std::sort(res.begin(), res.end());
-    res.erase(std::unique(res.begin(), res.end()), res.end());
     return res;
 }
 
 bool match_at(const std::string& input, size_t pos, const std::vector<Token>& tokens)
 {
-    return match_seq(tokens, 0, input, pos);
+    MatchState state;
+    return match_seq(tokens, 0, input, pos, state);
 }
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) {
     auto tokens = tokenize(pattern);
     bool anchored_start = !tokens.empty() && tokens[0].type == TokenType::StartAnchor;
     bool anchored_end = !tokens.empty() && tokens.back().type == TokenType::EndAnchor;
-    if (anchored_start) {
-        return match_at(input_line,0,tokens);
-    } else if (anchored_end) {
-        size_t match_len = tokens.size();
-        if(input_line.size() + 1 < match_len) return false;
-        size_t pos = input_line.size() - (match_len - 1);
-        return match_at(input_line,pos,tokens);
+    if (anchored_start && anchored_end) {
+        return match_at(input_line, 0, tokens);
+    } else if (anchored_start) {
+        return match_at(input_line, 0, tokens);
     } else {
         for(size_t pos = 0; pos <= input_line.size(); ++pos)
     {
