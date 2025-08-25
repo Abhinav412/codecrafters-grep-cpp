@@ -399,8 +399,8 @@ int main(int argc, char* argv[]) {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     std::cerr << "Logs from your program will appear here" << std::endl;
 
-    if (argc < 3 || argc > 4) {
-        std::cerr << "Expected two or three arguments" << std::endl;
+    if (argc < 3) {
+        std::cerr << "Expected at least two arguments" << std::endl;
         return 1;
     }
 
@@ -414,28 +414,38 @@ int main(int argc, char* argv[]) {
 
     bool found_match = false;
 
-    if(argc == 4) {
-        std::string filename = argv[3];
-        std::ifstream file(filename);
-        if(!file.is_open()) {
-            std::cerr << "Could not open file: " << filename << std::endl;
-            return 1;
-        }
-
-        std::string line;
-        while(std::getline(file, line)) {
-            try {
-                if (match_pattern(line, pattern)) {
-                    std::cout << line << std::endl;
-                    found_match = true;
-                }
-            } catch (const std::runtime_error& e) {
-                std::cerr << e.what() << std::endl;
+    if(argc >= 4) {
+        // File input mode (single or multiple files)
+        bool multiple_files = (argc > 4);
+        
+        for(int file_idx = 3; file_idx < argc; file_idx++) {
+            std::string filename = argv[file_idx];
+            std::ifstream file(filename);
+            if(!file.is_open()) {
+                std::cerr << "Could not open file: " << filename << std::endl;
                 return 1;
             }
+
+            std::string line;
+            while(std::getline(file, line)) {
+                try {
+                    if (match_pattern(line, pattern)) {
+                        if(multiple_files) {
+                            std::cout << filename << ":" << line << std::endl;
+                        } else {
+                            std::cout << line << std::endl;
+                        }
+                        found_match = true;
+                    }
+                } catch (const std::runtime_error& e) {
+                    std::cerr << e.what() << std::endl;
+                    return 1;
+                }
+            }
+            file.close();
         }
-        file.close();
     } else {
+        // Stdin input mode
         std::string input_line;
         std::getline(std::cin, input_line);
         try {
