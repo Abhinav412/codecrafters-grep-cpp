@@ -412,34 +412,42 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    //Uncomment this block to pass the first stage
-    
-    std::string input_line;
+    bool found_match = false;
+
     if(argc == 4) {
         std::string filename = argv[3];
         std::ifstream file(filename);
         if(!file.is_open()) {
-            std::cerr << "Could not open file:" << filename << std::endl;
+            std::cerr << "Could not open file: " << filename << std::endl;
             return 1;
         }
 
-        if(!std::getline(file, input_line)) {
-            return 1;
+        std::string line;
+        while(std::getline(file, line)) {
+            try {
+                if (match_pattern(line, pattern)) {
+                    std::cout << line << std::endl;
+                    found_match = true;
+                }
+            } catch (const std::runtime_error& e) {
+                std::cerr << e.what() << std::endl;
+                return 1;
+            }
         }
         file.close();
     } else {
+        std::string input_line;
         std::getline(std::cin, input_line);
-    }
-    
-    try {
-        if (match_pattern(input_line, pattern)) {
-            std::cout << input_line << std::endl;
-            return 0;
-        } else {
+        try {
+            if (match_pattern(input_line, pattern)) {
+                std::cout << input_line << std::endl;
+                found_match = true;
+            }
+        } catch (const std::runtime_error& e) {
+            std::cerr << e.what() << std::endl;
             return 1;
         }
-    } catch (const std::runtime_error& e) {
-        std::cerr << e.what() << std::endl;
-        return 1;
     }
+    
+    return found_match ? 0 : 1;
 }
