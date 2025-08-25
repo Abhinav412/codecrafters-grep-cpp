@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <fstream>
+#include <filesystem>
 
 enum class TokenType {
     StartAnchor,
@@ -404,26 +405,58 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string flag = argv[1];
-    std::string pattern = argv[2];
+    bool recursive = false;
+    int arg_idx = 1;
+
+    if (argc > 3 && std::string(argv[1]) == std::string("-r")) {
+        recursive = true;
+        arg_idx = 2;
+    }
+
+    std::string flag = argv[arg_idx];
+    std::string pattern = argv[arg_idx + 1];
 
     if (flag != "-E") {
         std::cerr << "Expected first argument to be '-E'" << std::endl;
         return 1;
     }
 
+    //Uncomment this block to pass the first stage
+
     bool found_match = false;
 
-    if(argc >= 4) {
-        // File input mode (single or multiple files)
-        bool multiple_files = (argc > 4);
+    if(argc >= arg_idx + 3) {
+        std::vector<std::string> files_to_process;
+    
+        for(int file_idx = arg_idx + 2; file_idx < argc; file_idx++) {
+            std::string path = argv[file_idx];
+            
+            if(recursive && std::filesystem::is_directory(path)) {
+                try {
+                    for(const auto& entry : std::filesystem::recursive_directory_iterator(path)) {
+                        if(entry.is_regular_file()) {
+                            files_to_process.push_back(entry.path().string());
+                        }
+                    }
+                } catch(const std::filesystem::filesystem_error& e) {
+                    std::cerr << "Error accessing directory: " << e.what() << std::endl;
+                    return 1;
+                }
+            } else if(std::filesystem::is_regular_file(path)) {
+                files_to_process.push_back(path);
+            } else if(!recursive) {
+                std::cerr << "Could not open file: " << path << std::endl;
+                return 1;
+            }
+        }
         
-        for(int file_idx = 3; file_idx < argc; file_idx++) {
-            std::string filename = argv[file_idx];
+        bool multiple_files = (files_to_process.size() > 1) || recursive;
+        
+        for(const std::string& filename : files_to_process) {
             std::ifstream file(filename);
             if(!file.is_open()) {
                 std::cerr << "Could not open file: " << filename << std::endl;
-                return 1;
+                continue;
             }
 
             std::string line;
@@ -431,7 +464,9 @@ int main(int argc, char* argv[]) {
                 try {
                     if (match_pattern(line, pattern)) {
                         if(multiple_files) {
-                            std::cout << filename << ":" << line << std::endl;
+                            std::string display_path = filename;
+                            std::replace(display_path.begin(), display_path.end(), '\\', '/');
+                            std::cout << display_path << ":" << line << std::endl;
                         } else {
                             std::cout << line << std::endl;
                         }
@@ -445,7 +480,6 @@ int main(int argc, char* argv[]) {
             file.close();
         }
     } else {
-        // Stdin input mode
         std::string input_line;
         std::getline(std::cin, input_line);
         try {
