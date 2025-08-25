@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <fstream>
 
 enum class TokenType {
     StartAnchor,
@@ -398,8 +399,8 @@ int main(int argc, char* argv[]) {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     std::cerr << "Logs from your program will appear here" << std::endl;
 
-    if (argc != 3) {
-        std::cerr << "Expected two arguments" << std::endl;
+    if (argc < 3 || argc > 4) {
+        std::cerr << "Expected two or three arguments" << std::endl;
         return 1;
     }
 
@@ -414,10 +415,25 @@ int main(int argc, char* argv[]) {
     //Uncomment this block to pass the first stage
     
     std::string input_line;
-    std::getline(std::cin, input_line);
+    if(argc == 4) {
+        std::string filename = argv[3];
+        std::ifstream file(filename);
+        if(!file.is_open()) {
+            std::cerr << "Could not open file:" << filename << std::endl;
+            return 1;
+        }
+
+        if(!std::getline(file, input_line)) {
+            return 1;
+        }
+        file.close();
+    } else {
+        std::getline(std::cin, input_line);
+    }
     
     try {
         if (match_pattern(input_line, pattern)) {
+            std::cout << input_line << std::endl;
             return 0;
         } else {
             return 1;
